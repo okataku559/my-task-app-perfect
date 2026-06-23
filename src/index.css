@@ -109,3 +109,13 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+/* 入力欄を強制的に「白背景・黒文字」にする魔法のルール */
+input, select {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+input::placeholder {
+  color: #9ca3af !important;
+}
