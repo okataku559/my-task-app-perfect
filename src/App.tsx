@@ -291,7 +291,7 @@ function TaskForm({ user, tasks }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">予測時間 (分)</label>
-            <input type="number" min="1" step="5" value={estimatedMinutes} onChange={(e) => setEstimatedMinutes(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none" />
+            <input type="number" min="1" step="1" value={estimatedMinutes} onChange={(e) => setEstimatedMinutes(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none" />
           </div>
         </div>
 
