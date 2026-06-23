@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-// ★ GoogleAuthProviderなどを追加でインポートします
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc 
 } from 'firebase/firestore';
 import { 
   Play, Pause, CheckSquare, Edit3, CalendarPlus, Plus, 
-  Trash2, Clock, AlertCircle, Folder, FileText, Check, LogOut
+  Trash2, Clock, AlertCircle, Folder, FileText, Check, LogOut, X, LayoutGrid, List
 } from 'lucide-react';
 
 // --- Firebase Initialization ---
@@ -31,14 +30,13 @@ const PRIORITIES = { high: '高', medium: '中', low: '低' };
 const PRIORITY_COLORS = { high: 'bg-red-100 text-red-800', medium: 'bg-yellow-100 text-yellow-800', low: 'bg-blue-100 text-blue-800' };
 const CATEGORY_COLORS = { work: 'bg-indigo-100 text-indigo-800', side_job: 'bg-emerald-100 text-emerald-800', private: 'bg-purple-100 text-purple-800' };
 
-// --- Components ---
-
 export default function App() {
   const [user, setUser] = useState(null);
-  const [isAuthChecking, setIsAuthChecking] = useState(true); // ログイン確認中かどうか
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [tasks, setTasks] = useState([]);
+  // 全体での簡易表示モードの状態を管理
+  const [isCompactMode, setIsCompactMode] = useState(false);
   
-  // 1. Firebase Auth (Google認証の状態を監視)
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -51,7 +49,6 @@ export default function App() {
     };
     initAuth();
 
-    // ユーザーのログイン状態が変わった時に実行される
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthChecking(false);
@@ -59,11 +56,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch Tasks from Firestore
   useEffect(() => {
-    if (!user) return; // ログインしていない時はデータを取得しない
+    if (!user) return;
     
-    // そのユーザー専用のフォルダ（データ）を参照する
     const tasksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'tasks');
     const unsubscribe = onSnapshot(tasksRef, (snapshot) => {
       const tasksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -75,7 +70,6 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // ★ Googleログイン処理
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -88,7 +82,6 @@ export default function App() {
     }
   };
 
-  // ★ ログアウト処理
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -97,12 +90,10 @@ export default function App() {
     }
   };
 
-  // ログイン確認中の画面
   if (isAuthChecking) {
     return <div className="min-h-screen bg-slate-50 flex items-center justify-center">読み込み中...</div>;
   }
 
-  // ★ ログインしていない場合の画面（Googleログインボタンを表示）
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -119,7 +110,6 @@ export default function App() {
             onClick={handleGoogleLogin} 
             className="w-full bg-white border border-slate-300 text-slate-700 font-semibold p-3 rounded-lg hover:bg-slate-50 transition flex items-center justify-center gap-3 shadow-sm"
           >
-            {/* GoogleのGアイコン (簡易版) */}
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -134,7 +124,6 @@ export default function App() {
     );
   }
 
-  // メイン画面 (ログイン後)
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 font-sans">
       <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-10">
@@ -145,8 +134,7 @@ export default function App() {
           </div>
           <div className="text-sm text-slate-500 flex items-center gap-4">
             <div className="flex items-center gap-2">
-              {/* ログインしているユーザーのアイコンと名前を表示 */}
-              <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" />
+              <img src={user.photoURL || ""} alt="Profile" className="w-6 h-6 rounded-full" />
               <span className="hidden sm:inline-block font-medium">{user.displayName}</span>
             </div>
             <button onClick={handleLogout} className="flex items-center gap-1 text-slate-400 hover:text-slate-600 transition" title="ログアウト">
@@ -161,7 +149,7 @@ export default function App() {
           <TaskForm user={user} tasks={tasks} />
         </div>
         <div className="w-full md:w-2/3">
-          <TaskList user={user} tasks={tasks} />
+          <TaskList user={user} tasks={tasks} isCompactMode={isCompactMode} setIsCompactMode={setIsCompactMode} />
         </div>
       </main>
     </div>
@@ -304,7 +292,7 @@ function TaskForm({ user, tasks }) {
 }
 
 // --- Task List Component ---
-function TaskList({ user, tasks }) {
+function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
   const [sortBy, setSortBy] = useState('dueDate'); 
   const [filterStatus, setFilterStatus] = useState('active'); 
 
@@ -321,7 +309,7 @@ function TaskList({ user, tasks }) {
       if (sortBy === 'dueDate') {
         if (!a.dueDate) return 1;
         if (!b.dueDate) return -1;
-        return new Date(a.dueDate) - new Date(b.dueDate);
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
       } else if (sortBy === 'priority') {
         const pScore = { high: 3, medium: 2, low: 1 };
         return pScore[b.priority] - pScore[a.priority];
@@ -340,23 +328,42 @@ function TaskList({ user, tasks }) {
           <button onClick={() => setFilterStatus('completed')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'completed' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>完了済</button>
           <button onClick={() => setFilterStatus('all')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'all' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>すべて</button>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-500">並び替え:</span>
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-50 border border-slate-200 rounded p-1 outline-none">
-            <option value="dueDate">期日が近い順</option>
-            <option value="priority">重要度が高い順</option>
-            <option value="createdAt">登録が新しい順</option>
-          </select>
+        
+        <div className="flex items-center gap-4 text-sm">
+          {/* 簡易表示切り替えスイッチ */}
+          <label className="flex items-center gap-2 cursor-pointer text-slate-600 select-none bg-slate-50 px-2 py-1 rounded border border-slate-200">
+            <input 
+              type="checkbox" 
+              checked={isCompactMode} 
+              onChange={(e) => setIsCompactMode(e.target.checked)}
+              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            />
+            <span className="font-medium text-xs flex items-center gap-1">
+              {isCompactMode ? <List className="w-3.5 h-3.5"/> : <LayoutGrid className="w-3.5 h-3.5"/>}
+              簡易表示
+            </span>
+          </label>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">並び替え:</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-50 border border-slate-200 rounded p-1 outline-none">
+              <option value="dueDate">期日が近い順</option>
+              <option value="priority">重要度が高い順</option>
+              <option value="createdAt">登録が新しい順</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className={isCompactMode ? "space-y-2" : "space-y-4"}>
         {processedTasks.length === 0 ? (
           <div className="text-center py-12 text-slate-500 bg-white rounded-2xl border border-dashed border-slate-300">
             タスクがありません。左のフォームから追加してください。
           </div>
         ) : (
-          processedTasks.map(task => <TaskItem key={task.id} task={task} user={user} />)
+          processedTasks.map(task => (
+            <TaskItem key={task.id} task={task} user={user} isCompact={isCompactMode} allTasks={tasks} />
+          ))
         )}
       </div>
     </div>
@@ -364,11 +371,23 @@ function TaskList({ user, tasks }) {
 }
 
 // --- Individual Task Component ---
-function TaskItem({ task, user }) {
+function TaskItem({ task, user, isCompact, allTasks }) {
+  // インライン編集モードの状態
+  const [isEditingTask, setIsEditingTask] = useState(false);
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editLarge, setEditLarge] = useState(task.largeTaskName);
+  const [editMedium, setEditMedium] = useState(task.mediumTaskName);
+  const [editCategory, setEditCategory] = useState(task.category);
+  const [editPriority, setEditPriority] = useState(task.priority);
+  const [editDueDate, setEditDueDate] = useState(task.dueDate || '');
+  const [editEstimated, setEditEstimated] = useState(task.estimatedMinutes);
+
   const [isEditingTime, setIsEditingTime] = useState(false);
   const [manualTime, setManualTime] = useState(task.actualMinutes);
-  
   const [liveElapsedMinutes, setLiveElapsedMinutes] = useState(0);
+
+  const uniqueLargeTasks = useMemo(() => [...new Set(allTasks.map(t => t.largeTaskName).filter(Boolean))], [allTasks]);
+  const uniqueMediumTasks = useMemo(() => [...new Set(allTasks.map(t => t.mediumTaskName).filter(Boolean))], [allTasks]);
 
   useEffect(() => {
     let interval;
@@ -438,8 +457,23 @@ function TaskItem({ task, user }) {
     setIsEditingTime(false);
   };
 
+  // 全体修正の保存
+  const handleSaveTaskEdit = async () => {
+    if (!editTitle.trim()) return;
+    await updateTask({
+      title: editTitle.trim(),
+      largeTaskName: editLarge.trim() || '未分類',
+      mediumTaskName: editMedium.trim() || '未分類',
+      category: editCategory,
+      priority: editPriority,
+      dueDate: editDueDate,
+      estimatedMinutes: parseInt(editEstimated, 10) || 0
+    });
+    setIsEditingTask(false);
+  };
+
   const getCalendarUrl = () => {
-    const title = encodeURIComponent(`[タスク完了] ${task.title}`);
+    const titleText = encodeURIComponent(`[タスク完了] ${task.title}`);
     const details = encodeURIComponent(
       `プロジェクト (大): ${task.largeTaskName}\n` +
       `フェーズ (中): ${task.mediumTaskName}\n\n` +
@@ -453,20 +487,146 @@ function TaskItem({ task, user }) {
     const start = new Date(end.getTime() - duration * 60000);
     
     const fmt = (d) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${fmt(start)}/${fmt(end)}`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${titleText}&details=${details}&dates=${fmt(start)}/${fmt(end)}`;
   };
 
   const isCompleted = task.status === 'completed';
 
+  // --- 修正・編集用の編集フォーム表示モード ---
+  if (isEditingTask) {
+    return (
+      <div className="bg-white rounded-xl shadow-md border-2 border-indigo-400 p-4 space-y-3">
+        <div className="flex justify-between items-center border-b pb-2">
+          <span className="text-xs font-bold text-indigo-600 flex items-center gap-1">
+            <Edit3 className="w-3.5 h-3.5"/> タスク内容を修正
+          </span>
+          <button onClick={() => setIsEditingTask(false)} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4"/>
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">大タスク</label>
+            <input type="text" list={`edit-large-${task.id}`} value={editLarge} onChange={(e)=>setEditLarge(e.target.value)} className="w-full p-1.5 border rounded" />
+            <datalist id={`edit-large-${task.id}`}>{uniqueLargeTasks.map(n => <option key={n} value={n}/>)}</datalist>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">中タスク</label>
+            <input type="text" list={`edit-medium-${task.id}`} value={editMedium} onChange={(e)=>setEditMedium(e.target.value)} className="w-full p-1.5 border rounded" />
+            <datalist id={`edit-medium-${task.id}`}>{uniqueMediumTasks.map(n => <option key={n} value={n}/>)}</datalist>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs text-slate-700 font-semibold mb-0.5">小タスク (作業名)</label>
+          <input type="text" value={editTitle} onChange={(e)=>setEditTitle(e.target.value)} className="w-full p-2 border rounded text-sm font-medium" />
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 text-xs">
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">カテゴリ</label>
+            <select value={editCategory} onChange={(e)=>setEditCategory(e.target.value)} className="w-full p-1.5 border rounded">
+              {Object.entries(CATEGORIES).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">重要度</label>
+            <select value={editPriority} onChange={(e)=>setEditPriority(e.target.value)} className="w-full p-1.5 border rounded">
+              {Object.entries(PRIORITIES).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">期日</label>
+            <input type="date" value={editDueDate} onChange={(e)=>setEditDueDate(e.target.value)} className="w-full p-1 border rounded" />
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">予測 (分)</label>
+            <input type="number" value={editEstimated} onChange={(e)=>setEditEstimated(e.target.value)} className="w-full p-1.5 border rounded" />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={() => setIsEditingTask(false)} className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-xs font-medium hover:bg-slate-200">キャンセル</button>
+          <button onClick={handleSaveTaskEdit} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 flex items-center gap-1 shadow-sm"><Check className="w-3.5 h-3.5"/> 変更を保存</button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- ② 簡易表示（コンパクト）モードのデザイン ---
+  if (isCompact) {
+    return (
+      <div className={`bg-white rounded-lg shadow-sm border px-3 py-2 flex items-center justify-between gap-3 text-sm transition-all ${isCompleted ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${PRIORITY_COLORS[task.priority]}`}>
+            {PRIORITIES[task.priority]}
+          </span>
+          <div className="truncate flex-1">
+            <span className={`font-bold ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+              {task.title}
+            </span>
+            <span className="text-[11px] text-slate-400 ml-2 hidden sm:inline-block">
+              ({task.largeTaskName} &gt; {task.mediumTaskName})
+            </span>
+          </div>
+          {task.dueDate && (
+            <span className="text-[11px] text-slate-500 shrink-0 bg-slate-100 px-1.5 py-0.5 rounded font-medium">
+              ⏰ {task.dueDate}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-xs text-slate-500 font-medium">
+            <span>{totalActualMinutes}</span>/<span className="text-slate-400">{task.estimatedMinutes}分</span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {!isCompleted && (
+              <>
+                {task.status !== 'in_progress' ? (
+                  <button onClick={handleStart} className="p-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition" title="スタート"><Play className="w-3.5 h-3.5" /></button>
+                ) : (
+                  <button onClick={handlePause} className="p-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 animate-pulse" title="一時停止"><Pause className="w-3.5 h-3.5" /></button>
+                )}
+                <button onClick={handleComplete} className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition" title="完了"><Check className="w-3.5 h-3.5" /></button>
+                <button onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }} className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-50" title="修正変更"><Edit3 className="w-3.5 h-3.5"/></button>
+              </>
+            )}
+            {isCompleted && (
+              <a href={getCalendarUrl()} target="_blank" rel="noopener noreferrer" className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition" title="カレンダー登録"><CalendarPlus className="w-3.5 h-3.5" /></a>
+            )}
+            <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 rounded transition" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- 通常表示モードのデザイン（従来通り） ---
   return (
     <div className={`bg-white rounded-xl shadow-sm border p-4 transition-all duration-300 ${isCompleted ? 'border-slate-200 opacity-75 bg-slate-50' : 'border-slate-200 hover:shadow-md'}`}>
       
-      <div className="flex items-center gap-2 text-xs text-slate-500 mb-2 font-medium bg-slate-100 w-fit px-2 py-1 rounded">
-        <Folder className="w-3 h-3" />
-        <span>{task.largeTaskName}</span>
-        <span className="text-slate-300">&gt;</span>
-        <FileText className="w-3 h-3" />
-        <span>{task.mediumTaskName}</span>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium bg-slate-100 w-fit px-2 py-1 rounded">
+          <Folder className="w-3 h-3" />
+          <span>{task.largeTaskName}</span>
+          <span className="text-slate-300">&gt;</span>
+          <FileText className="w-3 h-3" />
+          <span>{task.mediumTaskName}</span>
+        </div>
+        
+        {/* 通常表示時の修正用ボタン */}
+        {!isCompleted && (
+          <button 
+            onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }}
+            className="text-slate-400 hover:text-indigo-600 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded hover:bg-slate-50 transition"
+          >
+            <Edit3 className="w-3 h-3"/>
+            修正
+          </button>
+        )}
       </div>
 
       <div className="flex justify-between items-start gap-4">
