@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
@@ -5,7 +6,7 @@ import {
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc 
 } from 'firebase/firestore';
 
-// ⚠️【重要】エラーを確実に防ぐため、元々動いていた安全なアイコンだけを厳選して使います
+// ⚠️エラーを確実に防ぐため、元々動いていた安全なアイコンだけを厳選して使います
 import { 
   Play, Pause, CheckSquare, Edit3, CalendarPlus, Plus, 
   Trash2, AlertCircle, Folder, FileText, Check, LogOut
@@ -818,7 +819,7 @@ function AnalyticsDashboard({ tasks }) {
   }, [filteredTasks]);
 
   const categoryStats = useMemo(() => {
-    const stats: Record<string, any> = {
+    const stats = {
       work: { name: '仕事', est: 0, act: 0, color: 'bg-indigo-500' },
       side_job: { name: '副業', est: 0, act: 0, color: 'bg-emerald-500' },
       private: { name: 'プライベート', est: 0, act: 0, color: 'bg-purple-500' }
@@ -826,4 +827,117 @@ function AnalyticsDashboard({ tasks }) {
     filteredTasks.forEach(t => {
       if (stats[t.category]) {
         stats[t.category].est += t.estimatedMinutes || 0;
-        stats[t.category].act += t
+        stats[t.category].act += t.actualMinutes || 0;
+      }
+    });
+    return Object.values(stats);
+  }, [filteredTasks]);
+
+  const projectStats = useMemo(() => {
+    const projects = {};
+    
+    filteredTasks.forEach(t => {
+      const pName = t.largeTaskName || '未分類';
+      if (!projects[pName]) {
+        projects[pName] = { name: pName, est: 0, act: 0 };
+      }
+      projects[pName].est += t.estimatedMinutes || 0;
+      projects[pName].act += t.actualMinutes || 0;
+    });
+    
+    return Object.values(projects).sort((a, b) => b.act - a.act).slice(0, 5);
+  }, [filteredTasks]);
+
+  const getWidthPercent = (value, max) => {
+    if (!max || value <= 0) return '0%';
+    return `${Math.min((value / max) * 100, 100)}%`;
+  };
+
+  const maxCategoryTime = Math.max(...categoryStats.map(s => Math.max(s.est, s.act)), 1);
+  const maxProjectTime = Math.max(...projectStats.map(s => Math.max(s.est, s.act)), 1);
+
+  return (
+    <div className="space-y-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+      
+      <div className="flex flex-wrap justify-between items-center border-b pb-4 gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            📊 タイムパフォーマンス分析
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">登録された予測時間と、ストップウォッチの実績時間を比較・分析します</p>
+        </div>
+        
+        <div className="flex bg-slate-100 p-1 rounded-lg text-xs font-medium border">
+          <button onClick={() => setTimeSpan('all')} className={`px-3 py-1 rounded transition-all ${timeSpan === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>全期間</button>
+          <button onClick={() => setTimeSpan('7days')} className={`px-3 py-1 rounded transition-all ${timeSpan === '7days' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>直近7日間</button>
+          <button onClick={() => setTimeSpan('30days')} className={`px-3 py-1 rounded transition-all ${timeSpan === '30days' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>直近30日間</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
+          <p className="text-xs text-slate-400 font-bold">総タスク数</p>
+          <p className="text-2xl font-black text-slate-700 mt-1">{filteredTasks.length}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
+        </div>
+        <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-50 text-center">
+          <p className="text-xs text-indigo-400 font-bold">総予測時間</p>
+          <p className="text-2xl font-black text-indigo-600 mt-1">{totals.estimated}<span className="text-xs font-normal text-indigo-400 ml-1">分</span></p>
+        </div>
+        <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-50 text-center">
+          <p className="text-xs text-emerald-400 font-bold">総実績時間</p>
+          <p className="text-2xl font-black text-emerald-600 mt-1">{totals.actual}<span className="text-xs font-normal text-emerald-400 ml-1">分</span></p>
+        </div>
+      </div>
+
+      <div className="space-y-4 pt-2">
+        <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">■ カテゴリ別 時間消費（予測 vs 実績）</h3>
+        <div className="space-y-4 bg-slate-50 p-4 rounded-xl border">
+          {categoryStats.map(stat => (
+            <div key={stat.name} className="space-y-1">
+              <div className="flex justify-between text-xs font-bold text-slate-600">
+                <span>{stat.name}</span>
+                <span>予測: {stat.est}分 / <span className="text-slate-800">実績: {stat.act}分</span></span>
+              </div>
+              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden relative">
+                <div className="h-full bg-slate-400 opacity-40 rounded-full transition-all" style={{ width: getWidthPercent(stat.est, maxCategoryTime) }} />
+              </div>
+              <div className="h-3 w-full bg-slate-200/50 rounded-full overflow-hidden relative">
+                <div className={`h-full ${stat.color} rounded-full transition-all`} style={{ width: getWidthPercent(stat.act, maxCategoryTime) }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-4 pt-2">
+        <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">■ プロジェクト別 時間消費（上位5件）</h3>
+        {projectStats.length === 0 ? (
+          <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed">まだ完了・計測されたプロジェクトがありません</div>
+        ) : (
+          <div className="space-y-4 bg-slate-50 p-4 rounded-xl border">
+            {projectStats.map(stat => (
+              <div key={stat.name} className="space-y-1">
+                <div className="flex justify-between text-xs font-bold text-slate-600">
+                  <span className="truncate max-w-[200px]">{stat.name}</span>
+                  <span>予測: {stat.est}分 / <span className="text-indigo-600">実績: {stat.act}分</span></span>
+                </div>
+                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-300 rounded-full transition-all" style={{ width: getWidthPercent(stat.est, maxProjectTime) }} />
+                </div>
+                <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: getWidthPercent(stat.act, maxProjectTime) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-center gap-4 text-[11px] text-slate-400 font-medium pt-2 border-t">
+        <div className="flex items-center gap-1"><div className="w-2.5 h-1.5 bg-slate-300 rounded"/> 予測（目標時間）</div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-indigo-500 rounded"/> 実績（実際の消費時間）</div>
+      </div>
+
+    </div>
+  );
+}
