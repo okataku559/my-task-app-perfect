@@ -301,3 +301,711 @@ function TaskForm({ user, tasks }) {
             <datalist id="mediumTasks">
               {uniqueMediumTasks.map(name => <option key={name} value={name} />)}
             </datalist>
+          </div>
+          
+          <div className="pl-8 border-l-2 border-slate-200">
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <span className="text-red-500">*</span> 小タスク (実行する作業)
+            </label>
+            <input
+              type="text"
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-2.5 border border-slate-300 rounded-md text-sm outline-none font-medium"
+              placeholder="例: 本をダンボールに詰める"
+            />
+          </div>
+        </div>
+
+        {/* カテゴリと重要度の選択 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">カテゴリ</label>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none">
+              {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">重要度</label>
+            <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none">
+              {Object.entries(PRIORITIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* 期日と予測時間 */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">期日</label>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">予測時間 (分)</label>
+            <input type="number" min="1" step="1" value={estimatedMinutes} onChange={(e) => setEstimatedMinutes(e.target.value)} className="w-full p-2 border border-slate-300 rounded-md text-sm outline-none" />
+          </div>
+        </div>
+
+        <button type="submit" className="w-full mt-4 bg-indigo-600 text-white font-medium p-2.5 rounded-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">
+          <Plus className="w-4 h-4" /> タスクを追加
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ==========================================
+// 5. タスク一覧を表示するパーツ（右側のメインパーツ）
+// ==========================================
+function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
+  const [sortBy, setSortBy] = useState('dueDate');      // どの順番で並び替えるか
+  const [filterStatus, setFilterStatus] = useState('active'); // 未完了・完了済の切り替え状態
+
+  // 【機能】並び替えフィルターの計算ロジック
+  const processedTasks = useMemo(() => {
+    let result = [...tasks];
+
+    // 未完了・完了済のボタン選択に応じてリストを絞り込む
+    if (filterStatus === 'active') {
+      result = result.filter(t => t.status !== 'completed');
+    } else if (filterStatus === 'completed') {
+      result = result.filter(t => t.status === 'completed');
+    }
+
+    // 選ばれたルール（期日順、重要度順など）で並び替えを実行
+    result.sort((a, b) => {
+      if (sortBy === 'dueDate') {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      } else if (sortBy === 'priority') {
+        const pScore = { high: 3, medium: 2, low: 1 };
+        return pScore[b.priority] - pScore[a.priority];
+      } else {
+        return b.createdAt - a.createdAt; 
+      }
+    });
+    return result;
+  }, [tasks, sortBy, filterStatus]);
+
+  return (
+    <div className="space-y-4">
+      {/* フィルターや並び替えを操作するコントロールバー */}
+      <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
+        <div className="flex gap-2">
+          <button onClick={() => setFilterStatus('active')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'active' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>未完了</button>
+          <button onClick={() => setFilterStatus('completed')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'completed' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>完了済</button>
+          <button onClick={() => setFilterStatus('all')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'all' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>すべて</button>
+        </div>
+        
+        <div className="flex items-center gap-4 text-sm">
+          {/* 【改良】簡易表示（コンパクトモード）の切り替えチェックボックス */}
+          <label className="flex items-center gap-2 cursor-pointer text-slate-600 select-none bg-slate-50 px-2 py-1 rounded border border-slate-200">
+            <input 
+              type="checkbox" 
+              checked={isCompactMode} 
+              onChange={(e) => setIsCompactMode(e.target.checked)}
+              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            />
+            <span className="font-medium text-xs flex items-center gap-1">
+              {isCompactMode ? <List className="w-3.5 h-3.5"/> : <LayoutGrid className="w-3.5 h-3.5"/>}
+              簡易表示
+            </span>
+          </label>
+
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500">並び替え:</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-50 border border-slate-200 rounded p-1 outline-none">
+              <option value="dueDate">期日が近い順</option>
+              <option value="priority">重要度が高い順</option>
+              <option value="createdAt">登録が新しい順</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* タスクカードを上から順番に並べて表示するエリア */}
+      <div className={isCompactMode ? "space-y-2" : "space-y-4"}>
+        {processedTasks.length === 0 ? (
+          <div className="text-center py-12 text-slate-500 bg-white rounded-2xl border border-dashed border-slate-300">
+            タスクがありません。左のフォームから追加してください。
+          </div>
+        ) : (
+          processedTasks.map(task => (
+            // 個別のタスクコンポーネントを呼び出し。簡易表示かどうかの情報を渡しています
+            <TaskItem key={task.id} task={task} user={user} isCompact={isCompactMode} allTasks={tasks} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// 6. 個別のタスクカード（1枚1枚のカードの動き）
+// ==========================================
+function TaskItem({ task, user, isCompact, allTasks }) {
+  // --- 状態管理（カードが個別に記憶するデータ） ---
+  const [isEditingTask, setIsEditingTask] = useState(false); // 「丸ごと内容修正モード」がONかOFFか
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editLarge, setEditLarge] = useState(task.largeTaskName);
+  const [editMedium, setEditMedium] = useState(task.mediumTaskName);
+  const [editCategory, setEditCategory] = useState(task.category);
+  const [editPriority, setEditPriority] = useState(task.priority);
+  const [editDueDate, setEditDueDate] = useState(task.dueDate || '');
+  const [editEstimated, setEditEstimated] = useState(task.estimatedMinutes);
+
+  const [isEditingTime, setIsEditingTime] = useState(false);  // 「実績時間の直接手入力モード」がONかOFFか
+  const [manualTime, setManualTime] = useState(task.actualMinutes);
+  const [liveElapsedMinutes, setLiveElapsedMinutes] = useState(0); // タイマー駆動中にリアルタイムで進む分数
+
+  // 修正画面での予測候補用データ
+  const uniqueLargeTasks = useMemo(() => [...new Set(allTasks.map(t => t.largeTaskName).filter(Boolean))], [allTasks]);
+  const uniqueMediumTasks = useMemo(() => [...new Set(allTasks.map(t => t.mediumTaskName).filter(Boolean))], [allTasks]);
+
+  // タスクが「実行中」の時だけ、裏側で1分ごとに数値をカウントアップするタイマー
+  useEffect(() => {
+    let interval;
+    if (task.status === 'in_progress' && task.timerSessionStartTime) {
+      interval = setInterval(() => {
+        const ms = Date.now() - task.timerSessionStartTime;
+        setLiveElapsedMinutes(Math.floor(ms / 60000)); // ミリ秒を分に変換
+      }, 1000);
+    } else {
+      setLiveElapsedMinutes(0);
+    }
+    return () => clearInterval(interval);
+  }, [task.status, task.timerSessionStartTime]);
+
+  // 今までの実績時間 ＋ 今計測中の時間を合算
+  const totalActualMinutes = task.actualMinutes + liveElapsedMinutes;
+
+  // 【重要】Firebaseにデータを部分保存（上書き）する共通関数
+  const updateTask = async (updates) => {
+    if (!user) return;
+    const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
+    await updateDoc(taskRef, updates);
+  };
+
+  // タイマースタート
+  const handleStart = () => {
+    updateTask({
+      status: 'in_progress',
+      timerSessionStartTime: Date.now() // 計測を始めた時間を記録
+    });
+  };
+
+  // タイマー一時停止
+  const handlePause = () => {
+    if (task.timerSessionStartTime) {
+      const ms = Date.now() - task.timerSessionStartTime;
+      const mins = Math.floor(ms / 60000);
+      updateTask({
+        status: 'paused',
+        actualMinutes: task.actualMinutes + mins, // 進んだ分をこれまでの実績に足し算して保存
+        timerSessionStartTime: null
+      });
+    }
+  };
+
+  // タスク完了
+  const handleComplete = () => {
+    let finalActualMins = task.actualMinutes;
+    if (task.status === 'in_progress' && task.timerSessionStartTime) {
+      const ms = Date.now() - task.timerSessionStartTime;
+      finalActualMins += Math.floor(ms / 60000);
+    }
+    updateTask({
+      status: 'completed',
+      actualMinutes: finalActualMins,
+      timerSessionStartTime: null
+    });
+  };
+
+  // タスク削除
+  const handleDelete = async () => {
+    if (!user) return;
+    const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
+    await deleteDoc(taskRef);
+  };
+
+  // 実績時間の直接手入力の保存
+  const handleManualTimeSave = () => {
+    updateTask({
+      actualMinutes: parseInt(manualTime, 10) || 0,
+      timerSessionStartTime: null,
+      status: task.status === 'in_progress' ? 'paused' : task.status
+    });
+    setIsEditingTime(false);
+  };
+
+  // 【重要機能】新機能：いつでもタスク内容を丸ごと変更できる修正の保存処理
+  const handleSaveTaskEdit = async () => {
+    if (!editTitle.trim()) return;
+    await updateTask({
+      title: editTitle.trim(),
+      largeTaskName: editLarge.trim() || '未分類',
+      mediumTaskName: editMedium.trim() || '未分類',
+      category: editCategory,
+      priority: editPriority,
+      dueDate: editDueDate,
+      estimatedMinutes: parseInt(editEstimated, 10) || 0
+    });
+    setIsEditingTask(false); // 修正モードを終了
+  };
+
+  // 【重要機能】改良：カレンダー登録ボタンが押された時の処理
+  const handleCalendarRegister = async () => {
+    // 1. カレンダー登録画面を新しいタブ（別ウィンドウ）で開く
+    window.open(getCalendarUrl(), '_blank');
+    // 2. データを削除するのではなく、「カレンダーに登録済み」という印（フラグ）をTrueにして保存！
+    await updateTask({ calendarRegistered: true });
+  };
+
+  // Googleカレンダーに送る専用の長いURLリンクを作成する計算機
+  const getCalendarUrl = () => {
+    const titleText = encodeURIComponent(`[タスク完了] ${task.title}`);
+    const details = encodeURIComponent(
+      `プロジェクト (大): ${task.largeTaskName}\n` +
+      `フェーズ (中): ${task.mediumTaskName}\n\n` +
+      `カテゴリ: ${CATEGORIES[task.category]}\n` +
+      `予測時間: ${task.estimatedMinutes}分\n` +
+      `実績時間: ${task.actualMinutes}分`
+    );
+    
+    const end = new Date();
+    const duration = task.actualMinutes > 0 ? task.actualMinutes : 1;
+    const start = new Date(end.getTime() - duration * 60000);
+    
+    const fmt = (d) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${titleText}&details=${details}&dates=${fmt(start)}/${fmt(end)}`;
+  };
+
+  const isCompleted = task.status === 'completed';
+
+  // ------------------------------------------
+  // パターンA：内容を「修正・編集」している時の画面表示
+  // ------------------------------------------
+  if (isEditingTask) {
+    return (
+      <div className="bg-white rounded-xl shadow-md border-2 border-indigo-400 p-4 space-y-3">
+        <div className="flex justify-between items-center border-b pb-2">
+          <span className="text-xs font-bold text-indigo-600 flex items-center gap-1">
+            <Edit3 className="w-3.5 h-3.5"/> タスク内容を修正
+          </span>
+          <button onClick={() => setIsEditingTask(false)} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4"/>
+          </button>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">大タスク</label>
+            <input type="text" list={`edit-large-${task.id}`} value={editLarge} onChange={(e)=>setEditLarge(e.target.value)} className="w-full p-1.5 border rounded" />
+            <datalist id={`edit-large-${task.id}`}>{uniqueLargeTasks.map(n => <option key={n} value={n}/>)}</datalist>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">中タスク</label>
+            <input type="text" list={`edit-medium-${task.id}`} value={editMedium} onChange={(e)=>setEditMedium(e.target.value)} className="w-full p-1.5 border rounded" />
+            <datalist id={`edit-medium-${task.id}`}>{uniqueMediumTasks.map(n => <option key={n} value={n}/>)}</datalist>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs text-slate-700 font-semibold mb-0.5">小タスク (作業名)</label>
+          <input type="text" value={editTitle} onChange={(e)=>setEditTitle(e.target.value)} className="w-full p-2 border rounded text-sm font-medium" />
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 text-xs">
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">カテゴリ</label>
+            <select value={editCategory} onChange={(e)=>setEditCategory(e.target.value)} className="w-full p-1.5 border rounded">
+              {Object.entries(CATEGORIES).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">重要度</label>
+            <select value={editPriority} onChange={(e)=>setEditPriority(e.target.value)} className="w-full p-1.5 border rounded">
+              {Object.entries(PRIORITIES).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">期日</label>
+            <input type="date" value={editDueDate} onChange={(e)=>setEditDueDate(e.target.value)} className="w-full p-1 border rounded" />
+          </div>
+          <div>
+            <label className="block text-slate-500 font-semibold mb-0.5">予測 (分)</label>
+            <input type="number" value={editEstimated} onChange={(e)=>setEditEstimated(e.target.value)} className="w-full p-1.5 border rounded" />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={() => setIsEditingTask(false)} className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-xs font-medium hover:bg-slate-200">キャンセル</button>
+          <button onClick={handleSaveTaskEdit} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 flex items-center gap-1 shadow-sm"><Check className="w-3.5 h-3.5"/> 変更を保存</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ------------------------------------------
+  // パターンB：新機能「簡易表示（コンパクト）」モードの画面表示
+  // ------------------------------------------
+  if (isCompact) {
+    return (
+      <div className={`bg-white rounded-lg shadow-sm border px-3 py-2 flex items-center justify-between gap-3 text-sm transition-all ${isCompleted ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${PRIORITY_COLORS[task.priority]}`}>
+            {PRIORITIES[task.priority]}
+          </span>
+          <div className="truncate flex-1">
+            <span className={`font-bold ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+              {task.title}
+            </span>
+            <span className="text-[11px] text-slate-400 ml-2 hidden sm:inline-block">
+              ({task.largeTaskName} &gt; {task.mediumTaskName})
+            </span>
+          </div>
+          {task.dueDate && (
+            <span className="text-[11px] text-slate-500 shrink-0 bg-slate-100 px-1.5 py-0.5 rounded font-medium">
+              ⏰ {task.dueDate}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-xs text-slate-500 font-medium">
+            <span>{totalActualMinutes}</span>/<span className="text-slate-400">{task.estimatedMinutes}分</span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {!isCompleted && (
+              <>
+                {task.status !== 'in_progress' ? (
+                  <button onClick={handleStart} className="p-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition" title="スタート"><Play className="w-3.5 h-3.5" /></button>
+                ) : (
+                  <button onClick={handlePause} className="p-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 animate-pulse" title="一時停止"><Pause className="w-3.5 h-3.5" /></button>
+                )}
+                <button onClick={handleComplete} className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition" title="完了"><Check className="w-3.5 h-3.5" /></button>
+                {/* 簡易表示用の修正ボタン */}
+                <button onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }} className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-50" title="修正変更"><Edit3 className="w-3.5 h-3.5"/></button>
+              </>
+            )}
+            
+            {/* 【改良】簡易表示時のカレンダー登録ボタン部分（登録済みの場合はチェックマーク化） */}
+            {isCompleted && (
+              task.calendarRegistered ? (
+                <span className="p-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed" title="カレンダーに登録済み"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500"/></span>
+              ) : (
+                <button onClick={handleCalendarRegister} className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition" title="カレンダー登録"><CalendarPlus className="w-3.5 h-3.5" /></button>
+              )
+            )}
+            <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 rounded transition" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ------------------------------------------
+  // パターンC：いつもの「通常（大きめ）」表示モードの画面表示
+  // ------------------------------------------
+  return (
+    <div className={`bg-white rounded-xl shadow-sm border p-4 transition-all duration-300 ${isCompleted ? 'border-slate-200 opacity-75 bg-slate-50' : 'border-slate-200 hover:shadow-md'}`}>
+      
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium bg-slate-100 w-fit px-2 py-1 rounded">
+          <Folder className="w-3 h-3" />
+          <span>{task.largeTaskName}</span>
+          <span className="text-slate-300">&gt;</span>
+          <FileText className="w-3 h-3" />
+          <span>{task.mediumTaskName}</span>
+        </div>
+        
+        {/* 通常表示時の「修正する」ボタン。押すとパターンAに変身します */}
+        {!isCompleted && (
+          <button 
+            onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }}
+            className="text-slate-400 hover:text-indigo-600 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded hover:bg-slate-50 transition"
+          >
+            <Edit3 className="w-3 h-3"/>
+            修正する
+          </button>
+        )}
+      </div>
+
+      <div className="flex justify-between items-start gap-4">
+        <div className="flex-1">
+          <h3 className={`text-lg font-bold mb-2 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+            {task.title}
+          </h3>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[task.priority]}`}>
+              {PRIORITIES[task.priority]}
+            </span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[task.category]}`}>
+              {CATEGORIES[task.category]}
+            </span>
+            {task.dueDate && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                期日: {task.dueDate}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <button onClick={handleDelete} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="タスク削除">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+        
+        <div className="flex items-center gap-4 w-full sm:w-auto">
+          <div className="text-center">
+            <p className="text-xs text-slate-500 font-medium">予測</p>
+            <p className="text-lg font-bold text-slate-700">{task.estimatedMinutes}<span className="text-xs font-normal text-slate-500 ml-1">分</span></p>
+          </div>
+          <div className="text-slate-300 text-2xl font-light">/</div>
+          <div className="text-center group relative">
+            <p className="text-xs text-indigo-500 font-medium flex items-center justify-center gap-1">
+              実績
+              {!isCompleted && !isEditingTime && (
+                <button onClick={() => { setIsEditingTime(true); setManualTime(totalActualMinutes); }} className="text-slate-400 hover:text-indigo-600 p-0.5 rounded" title="実績時間を直接手書きで修正">
+                  <Edit3 className="w-3 h-3" />
+                </button>
+              )}
+            </p>
+            {isEditingTime ? (
+              <div className="flex items-center gap-1">
+                <input 
+                  type="number" 
+                  value={manualTime} 
+                  onChange={(e) => setManualTime(e.target.value)}
+                  className="w-16 p-1 text-center border border-indigo-300 rounded text-sm outline-none"
+                />
+                <button onClick={handleManualTimeSave} className="bg-indigo-100 text-indigo-700 p-1 rounded hover:bg-indigo-200"><Check className="w-4 h-4"/></button>
+              </div>
+            ) : (
+              <p className={`text-lg font-bold ${task.status === 'in_progress' ? 'text-indigo-600 animate-pulse' : 'text-slate-700'}`}>
+                {totalActualMinutes}
+                <span className="text-xs font-normal text-slate-500 ml-1">分</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          {!isCompleted && (
+            <>
+              {task.status !== 'in_progress' ? (
+                <button onClick={handleStart} className="flex items-center gap-1 bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 transition shadow-sm">
+                  <Play className="w-4 h-4" /> スタート
+                </button>
+              ) : (
+                <button onClick={handlePause} className="flex items-center gap-1 bg-amber-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-600 transition shadow-sm">
+                  <Pause className="w-4 h-4" /> 一時停止
+                </button>
+              )}
+              
+              <button onClick={handleComplete} className="flex items-center gap-1 bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium hover:bg-slate-300 transition">
+                <CheckSquare className="w-4 h-4" /> 完了
+              </button>
+            </>
+          )}
+
+          {/* 【改良】通常表示時のカレンダー登録ボタン（登録が完了すると見た目が変化して二重押しを防ぎます） */}
+          {isCompleted && (
+            task.calendarRegistered ? (
+              <button disabled className="flex items-center gap-2 bg-slate-100 text-slate-400 border border-slate-200 px-4 py-2 rounded-lg font-medium cursor-not-allowed">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> カレンダー登録済
+              </button>
+            ) : (
+              <button 
+                onClick={handleCalendarRegister} 
+                className="flex items-center gap-2 bg-[#4285F4] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#3367D6] transition shadow-sm"
+              >
+                <CalendarPlus className="w-4 h-4" /> カレンダーに登録
+              </button>
+            )
+          )}
+        </div>
+      </div>
+      
+      {task.estimatedMinutes > 0 && (
+        <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-500 ${totalActualMinutes > task.estimatedMinutes ? 'bg-red-500' : 'bg-indigo-500'}`}
+            style={{ width: `${Math.min((totalActualMinutes / task.estimatedMinutes) * 100, 100)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// 7. 【新機能】予実分析グラフ・ダッシュボード（完全自作）
+// ==========================================
+function AnalyticsDashboard({ tasks }) {
+  const [timeSpan, setTimeSpan] = useState('all'); // 期間フィルター（すべて / 直近7日 / 直近30日）
+
+  // 【計算】選ばれた期間（直近7日など）に応じて、タスクをろ過（フィルター）するロジック
+  const filteredTasks = useMemo(() => {
+    const now = Date.now();
+    return tasks.filter(task => {
+      if (timeSpan === '7days') return (now - task.createdAt) <= 7 * 24 * 60 * 60 * 1000; // 7日間のミリ秒
+      if (timeSpan === '30days') return (now - task.createdAt) <= 30 * 24 * 60 * 60 * 1000;
+      return true; // 'all'の場合は全部
+    });
+  }, [tasks, timeSpan]);
+
+  // 【計算】すべてのタスクの予測時間と実績時間の「合計値」を計算する
+  const totals = useMemo(() => {
+    let est = 0;
+    let act = 0;
+    filteredTasks.forEach(t => {
+      est += t.estimatedMinutes || 0;
+      act += t.actualMinutes || 0;
+    });
+    return { estimated: est, actual: act };
+  }, [filteredTasks]);
+
+  // 【計算】カテゴリ（仕事・副業・プライベート）ごとに、時間をグループ集計する
+  const categoryStats = useMemo(() => {
+    const stats = {
+      work: { name: '仕事', est: 0, act: 0, color: 'bg-indigo-500' },
+      side_job: { name: '副業', est: 0, act: 0, color: 'bg-emerald-500' },
+      private: { name: 'プライベート', est: 0, act: 0, color: 'bg-purple-500' }
+    };
+    filteredTasks.forEach(t => {
+      if (stats[t.category]) {
+        stats[t.category].est += t.estimatedMinutes || 0;
+        stats[t.category].act += t.actualMinutes || 0;
+      }
+    });
+    return Object.values(stats);
+  }, [filteredTasks]);
+
+  // 【計算】大タスク（プロジェクト名）ごとに、時間をグループ集計する
+  const projectStats = useMemo(() => {
+    const projects: { [key: string]: { name: string, est: 0, act: 0 } } = {};
+    
+    filteredTasks.forEach(t => {
+      const pName = t.largeTaskName || '未分類';
+      if (!projects[pName]) {
+        projects[pName] = { name: pName, est: 0, act: 0 };
+      }
+      projects[pName].est += t.estimatedMinutes || 0;
+      projects[pName].act += t.actualMinutes || 0;
+    });
+    
+    // 実績時間が長い順番に並び替えて、上位5件だけをグラフに出すように調整
+    return Object.values(projects).sort((a, b) => b.act - a.act).slice(0, 5);
+  }, [filteredTasks]);
+
+  // グラフの横棒の長さをパーセンテージで計算する便利ツール（最大値を100%の長さとして縮尺を合わせる）
+  const getWidthPercent = (value, max) => {
+    if (!max || value <= 0) return '0%';
+    return `${Math.min((value / max) * 100, 100)}%`;
+  };
+
+  // カテゴリやプロジェクトの中で、一番時間がかかっている数値を割り出す（グラフの最大幅の基準になります）
+  const maxCategoryTime = Math.max(...categoryStats.map(s => Math.max(s.est, s.act)), 1);
+  const maxProjectTime = Math.max(...projectStats.map(s => Math.max(s.est, s.act)), 1);
+
+  return (
+    <div className="space-y-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+      
+      {/* ダッシュボードのヘッダーエリア */}
+      <div className="flex flex-wrap justify-between items-center border-b pb-4 gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-indigo-500"/> タイムパフォーマンス分析
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">登録された予測時間と、ストップウォッチの実績時間を比較・分析します</p>
+        </div>
+        
+        {/* 期間を切り替えるボタン（ここを押すと、グラフが瞬時に再計算されます） */}
+        <div className="flex bg-slate-100 p-1 rounded-lg text-xs font-medium border">
+          <button onClick={() => setTimeSpan('all')} className={`px-3 py-1 rounded transition-all ${timeSpan === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>全期間</button>
+          <button onClick={() => setTimeSpan('7days')} className={`px-3 py-1 rounded transition-all ${timeSpan === '7days' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>直近7日間</button>
+          <button onClick={() => setTimeSpan('30days')} className={`px-3 py-1 rounded transition-all ${timeSpan === '30days' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}>直近30日間</button>
+        </div>
+      </div>
+
+      {/* データの総まとめミニカード（3つ並び） */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
+          <p className="text-xs text-slate-400 font-bold">総タスク数</p>
+          <p className="text-2xl font-black text-slate-700 mt-1">{filteredTasks.length}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
+        </div>
+        <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-50 text-center">
+          <p className="text-xs text-indigo-400 font-bold">総予測時間</p>
+          <p className="text-2xl font-black text-indigo-600 mt-1">{totals.estimated}<span className="text-xs font-normal text-indigo-400 ml-1">分</span></p>
+        </div>
+        <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-50 text-center">
+          <p className="text-xs text-emerald-400 font-bold">総実績時間</p>
+          <p className="text-2xl font-black text-emerald-600 mt-1">{totals.actual}<span className="text-xs font-normal text-emerald-400 ml-1">分</span></p>
+        </div>
+      </div>
+
+      {/* グラフその1：カテゴリ別の予実バーグラフ */}
+      <div className="space-y-4 pt-2">
+        <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">■ カテゴリ別 時間消費（予測 vs 実績）</h3>
+        <div className="space-y-4 bg-slate-50 p-4 rounded-xl border">
+          {categoryStats.map(stat => (
+            <div key={stat.name} className="space-y-1">
+              <div className="flex justify-between text-xs font-bold text-slate-600">
+                <span>{stat.name}</span>
+                <span>予測: {stat.est}分 / <span className="text-slate-800">実績: {stat.act}分</span></span>
+              </div>
+              {/* 予測用の薄いバー */}
+              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden relative">
+                <div className="h-full bg-slate-400 opacity-40 rounded-full transition-all" style={{ width: getWidthPercent(stat.est, maxCategoryTime) }} />
+              </div>
+              {/* 実績用の色のついた太いバー */}
+              <div className="h-3 w-full bg-slate-200/50 rounded-full overflow-hidden relative">
+                <div className={`h-full ${stat.color} rounded-full transition-all`} style={{ width: getWidthPercent(stat.act, maxCategoryTime) }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* グラフその2：大タスク（プロジェクト）別の予実バーグラフ */}
+      <div className="space-y-4 pt-2">
+        <h3 className="text-sm font-bold text-slate-700 flex items-center gap-1">■ プロジェクト別 時間消費（上位5件）</h3>
+        {projectStats.length === 0 ? (
+          <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed">まだ完了・計測されたプロジェクトがありません</div>
+        ) : (
+          <div className="space-y-4 bg-slate-50 p-4 rounded-xl border">
+            {projectStats.map(stat => (
+              <div key={stat.name} className="space-y-1">
+                <div className="flex justify-between text-xs font-bold text-slate-600">
+                  <span className="truncate max-w-[200px]">{stat.name}</span>
+                  <span>予測: {stat.est}分 / <span className="text-indigo-600">実績: {stat.act}分</span></span>
+                </div>
+                {/* 予測バー */}
+                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-300 rounded-full transition-all" style={{ width: getWidthPercent(stat.est, maxProjectTime) }} />
+                </div>
+                {/* 実績バー */}
+                <div className="h-2.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: getWidthPercent(stat.act, maxProjectTime) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 凡例（色の説明） */}
+      <div className="flex justify-center gap-4 text-[11px] text-slate-400 font-medium pt-2 border-t">
+        <div className="flex items-center gap-1"><div className="w-2.5 h-1.5 bg-slate-300 rounded"/> 予測（目標時間）</div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 bg-indigo-500 rounded"/> 実績（実際の消費時間）</div>
+      </div>
+
+    </div>
+  );
+}
