@@ -359,18 +359,24 @@ function TaskForm({ user, tasks }) {
 // ==========================================
 function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
   const [sortBy, setSortBy] = useState('dueDate');      // どの順番で並び替えるか
-  const [filterStatus, setFilterStatus] = useState('active'); // 未完了・完了済の切り替え状態
+  const [filterStatus, setFilterStatus] = useState('active'); // タブの切り替え状態（新しく4つに増えました！）
 
-  // 【機能】並び替えフィルターの計算ロジック
+  // 【機能】並び替え・フィルターの計算ロジック
   const processedTasks = useMemo(() => {
     let result = [...tasks];
 
-    // 未完了・完了済のボタン選択に応じてリストを絞り込む
+    // 【改良】4つのタブの選択に応じてリストを絞り込む
     if (filterStatus === 'active') {
+      // 「未完了」タブ：まだ完了していないタスクすべて
       result = result.filter(t => t.status !== 'completed');
     } else if (filterStatus === 'completed') {
-      result = result.filter(t => t.status === 'completed');
+      // 「完了済(未登録)」タブ：完了したけど、まだカレンダーに登録していないタスクだけ！
+      result = result.filter(t => t.status === 'completed' && !t.calendarRegistered);
+    } else if (filterStatus === 'registered') {
+      // 「カレンダー登録済」タブ：カレンダー登録の印（フラグ）がついているタスクだけ！
+      result = result.filter(t => t.calendarRegistered === true);
     }
+    // 'all' の場合は何もしない（すべて表示）
 
     // 選ばれたルール（期日順、重要度順など）で並び替えを実行
     result.sort((a, b) => {
@@ -391,15 +397,21 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
   return (
     <div className="space-y-4">
       {/* フィルターや並び替えを操作するコントロールバー */}
-      <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
-        <div className="flex gap-2">
+      <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col xl:flex-row gap-4 xl:items-center justify-between">
+        
+        {/* 【改良】4つに増えたフィルターのタブボタン */}
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => setFilterStatus('active')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'active' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>未完了</button>
-          <button onClick={() => setFilterStatus('completed')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'completed' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>完了済</button>
+          
+          {/* 完了済みのラベルを少しわかりやすく「完了済(未登録)」にしています */}
+          <button onClick={() => setFilterStatus('completed')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'completed' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>完了済<span className="hidden sm:inline">(未登録)</span></button>
+          
+          <button onClick={() => setFilterStatus('registered')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'registered' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>カレンダー登録済</button>
           <button onClick={() => setFilterStatus('all')} className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${filterStatus === 'all' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}>すべて</button>
         </div>
         
-        <div className="flex items-center gap-4 text-sm">
-          {/* 【改良】簡易表示（コンパクトモード）の切り替えチェックボックス */}
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          {/* 簡易表示（コンパクトモード）の切り替えチェックボックス */}
           <label className="flex items-center gap-2 cursor-pointer text-slate-600 select-none bg-slate-50 px-2 py-1 rounded border border-slate-200">
             <input 
               type="checkbox" 
@@ -428,7 +440,7 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
       <div className={isCompactMode ? "space-y-2" : "space-y-4"}>
         {processedTasks.length === 0 ? (
           <div className="text-center py-12 text-slate-500 bg-white rounded-2xl border border-dashed border-slate-300">
-            タスクがありません。左のフォームから追加してください。
+            条件に一致するタスクがありません。
           </div>
         ) : (
           processedTasks.map(task => (
@@ -539,7 +551,7 @@ function TaskItem({ task, user, isCompact, allTasks }) {
     setIsEditingTime(false);
   };
 
-  // 【重要機能】新機能：いつでもタスク内容を丸ごと変更できる修正の保存処理
+  // 【重要機能】いつでもタスク内容を丸ごと変更できる修正の保存処理
   const handleSaveTaskEdit = async () => {
     if (!editTitle.trim()) return;
     await updateTask({
@@ -648,11 +660,11 @@ function TaskItem({ task, user, isCompact, allTasks }) {
   }
 
   // ------------------------------------------
-  // パターンB：新機能「簡易表示（コンパクト）」モードの画面表示
+  // パターンB：簡易表示（コンパクト）モードの画面表示
   // ------------------------------------------
   if (isCompact) {
     return (
-      <div className={`bg-white rounded-lg shadow-sm border px-3 py-2 flex items-center justify-between gap-3 text-sm transition-all ${isCompleted ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+      <div className={`bg-white rounded-lg shadow-sm border px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm transition-all ${isCompleted ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${PRIORITY_COLORS[task.priority]}`}>
             {PRIORITIES[task.priority]}
@@ -661,7 +673,7 @@ function TaskItem({ task, user, isCompact, allTasks }) {
             <span className={`font-bold ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
               {task.title}
             </span>
-            <span className="text-[11px] text-slate-400 ml-2 hidden sm:inline-block">
+            <span className="text-[11px] text-slate-400 ml-2 hidden lg:inline-block">
               ({task.largeTaskName} &gt; {task.mediumTaskName})
             </span>
           </div>
@@ -672,7 +684,7 @@ function TaskItem({ task, user, isCompact, allTasks }) {
           )}
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
           <div className="text-xs text-slate-500 font-medium">
             <span>{totalActualMinutes}</span>/<span className="text-slate-400">{task.estimatedMinutes}分</span>
           </div>
@@ -686,12 +698,11 @@ function TaskItem({ task, user, isCompact, allTasks }) {
                   <button onClick={handlePause} className="p-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 animate-pulse" title="一時停止"><Pause className="w-3.5 h-3.5" /></button>
                 )}
                 <button onClick={handleComplete} className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition" title="完了"><Check className="w-3.5 h-3.5" /></button>
-                {/* 簡易表示用の修正ボタン */}
                 <button onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }} className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-50" title="修正変更"><Edit3 className="w-3.5 h-3.5"/></button>
               </>
             )}
             
-            {/* 【改良】簡易表示時のカレンダー登録ボタン部分（登録済みの場合はチェックマーク化） */}
+            {/* カレンダー登録ボタン部分 */}
             {isCompleted && (
               task.calendarRegistered ? (
                 <span className="p-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed" title="カレンダーに登録済み"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-500"/></span>
@@ -814,7 +825,7 @@ function TaskItem({ task, user, isCompact, allTasks }) {
             </>
           )}
 
-          {/* 【改良】通常表示時のカレンダー登録ボタン（登録が完了すると見た目が変化して二重押しを防ぎます） */}
+          {/* カレンダー登録ボタン（登録が完了すると見た目が変化して二重押しを防ぎます） */}
           {isCompleted && (
             task.calendarRegistered ? (
               <button disabled className="flex items-center gap-2 bg-slate-100 text-slate-400 border border-slate-200 px-4 py-2 rounded-lg font-medium cursor-not-allowed">
@@ -845,7 +856,7 @@ function TaskItem({ task, user, isCompact, allTasks }) {
 }
 
 // ==========================================
-// 7. 【新機能】予実分析グラフ・ダッシュボード（完全自作）
+// 7. 予実分析グラフ・ダッシュボード
 // ==========================================
 function AnalyticsDashboard({ tasks }) {
   const [timeSpan, setTimeSpan] = useState('all'); // 期間フィルター（すべて / 直近7日 / 直近30日）
