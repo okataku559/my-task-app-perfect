@@ -1,15 +1,15 @@
 // @ts-nocheck
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc 
 } from 'firebase/firestore';
 
-// ⚠️エラーを確実に防ぐため、元々動いていた安全なアイコンだけを厳選して使います
 import { 
-  Play, Pause, CheckSquare, Edit3, CalendarPlus, Plus, 
-  Trash2, AlertCircle, Folder, FileText, Check, LogOut
+  Play, Pause, CheckSquare, Edit, CalendarPlus, Plus, 
+  Trash2, AlertCircle, Folder, FileText, Check, LogOut, X, Grid, List, BarChart, CheckCircle,
+  GripVertical, Repeat // 👈 ドラッグ用のグリップアイコンと、定期タスク用のアイコンを追加しました
 } from 'lucide-react';
 
 // ==========================================
@@ -66,9 +66,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // データの取得
   useEffect(() => {
     if (!user) return;
-    
     const tasksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'tasks');
     const unsubscribe = onSnapshot(tasksRef, (snapshot) => {
       const tasksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -76,9 +76,73 @@ export default function App() {
     }, (error) => {
       console.error("Firestore Error:", error);
     });
-    
     return () => unsubscribe();
   }, [user]);
+
+  // 【新機能】定期タスク（ルーティン）の自動生成ロジック
+  // アプリを開いたときやタスクが更新されたときに、裏側でコッソリ「今日の分のタスク」を作ります
+  useEffect(() => {
+    if (!user || tasks.length === 0) return;
+
+    // パソコンの時計から、正確な「今日の日付(YYYY-MM-DD)」を作ります
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+    const generateRoutineTasks = async () => {
+      for (const task of tasks) {
+        // 「繰り返し」が設定されていない普通のタスクは無視します
+        if (!task.recurrence || task.recurrence === 'none') continue;
+        
+        // 最後にタスクを複製した日を調べます
+        const lastGenDate = task.lastGeneratedDate || task.dueDate || new Date(task.createdAt).toISOString().split('T')[0];
+        
+        // 既に今日、複製が終わっているなら無視します
+        if (lastGenDate >= todayStr) continue;
+
+        let shouldGenerate = false;
+        
+        // 「毎日」設定の場合は、無条件で今日生成します
+        if (task.recurrence === 'daily') {
+          shouldGenerate = true;
+        } 
+        // 「毎週」設定の場合は、最後に生成した日から7日以上経っているか確認します
+        else if (task.recurrence === 'weekly') {
+          const lastDate = new Date(lastGenDate);
+          const diffDays = (today - lastDate) / (1000 * 60 * 60 * 24);
+          if (diffDays >= 7) shouldGenerate = true;
+        }
+
+        if (shouldGenerate) {
+          try {
+            // 1. まず元の親タスクに「今日は複製済みだよ」と記録します
+            const parentRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
+            await updateDoc(parentRef, { lastGeneratedDate: todayStr });
+
+            // 2. 今日やるための新しい「子タスク」を作成します
+            const newTaskId = crypto.randomUUID();
+            const newTaskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', newTaskId);
+            const newTask = {
+              ...task,
+              id: newTaskId,
+              actualMinutes: 0, // 実績時間は0に戻す
+              status: 'todo',   // 未完了に戻す
+              timerSessionStartTime: null,
+              calendarRegistered: false,
+              createdAt: Date.now(),
+              dueDate: todayStr, // 期日は「今日」！
+              recurrence: 'none', // 子タスクがさらに無限増殖しないように、繰り返しはオフにする
+            };
+            delete newTask.lastGeneratedDate; // 余計なデータを消す
+            
+            await setDoc(newTaskRef, newTask);
+          } catch (err) {
+            console.error("Auto generation error:", err);
+          }
+        }
+      }
+    };
+    generateRoutineTasks();
+  }, [tasks, user]); // タスクのデータが変わるたびにチェックします
 
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -148,13 +212,13 @@ export default function App() {
               onClick={() => setActiveTab('tasks')} 
               className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'tasks' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              📋 タスク管理
+              <List className="w-3.5 h-3.5"/> タスク管理
             </button>
             <button 
               onClick={() => setActiveTab('analytics')} 
               className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'analytics' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             >
-              📊 予実分析グラフ
+              <BarChart className="w-3.5 h-3.5"/> 予実分析グラフ
             </button>
           </div>
 
@@ -197,6 +261,7 @@ function TaskForm({ user, tasks }) {
   const [priority, setPriority] = useState('medium');
   const [dueDate, setDueDate] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(30);
+  const [recurrence, setRecurrence] = useState('none'); // 【新機能】繰り返しの設定
 
   const uniqueLargeTasks = useMemo(() => [...new Set(tasks.map(t => t.largeTaskName).filter(Boolean))], [tasks]);
   const uniqueMediumTasks = useMemo(() => [...new Set(tasks.map(t => t.mediumTaskName).filter(Boolean))], [tasks]);
@@ -204,6 +269,9 @@ function TaskForm({ user, tasks }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!title.trim() || !user) return;
+
+    // 【重要】ドラッグ＆ドロップ用に「一番下に並べるための番号（order）」を付けます
+    const nextOrder = tasks.length > 0 ? Math.max(...tasks.map(t => t.order || 0)) + 1 : 0;
 
     const newTask = {
       largeTaskName: largeTaskName.trim() || '未分類',
@@ -218,6 +286,11 @@ function TaskForm({ user, tasks }) {
       timerSessionStartTime: null,
       calendarRegistered: false,
       createdAt: Date.now(),
+      order: nextOrder,
+      
+      // 定期タスク（ルーティン）かどうかの情報を追加
+      recurrence: recurrence,
+      isRoutine: recurrence !== 'none', // ルーティンとして登録されたらフラグを立てる（分析用）
     };
 
     try {
@@ -227,6 +300,7 @@ function TaskForm({ user, tasks }) {
       
       setTitle('');
       setEstimatedMinutes(30);
+      setRecurrence('none'); // 追加後はリセット
     } catch (err) {
       console.error("Add task error:", err);
     }
@@ -277,7 +351,7 @@ function TaskForm({ user, tasks }) {
           
           <div className="pl-8 border-l-2 border-slate-200">
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              <span className="text-red-500">*</span> 小タスク (実行する作業)
+              <span className="text-red-500">*</span> 小タスク (作業名)
             </label>
             <input
               type="text"
@@ -316,7 +390,19 @@ function TaskForm({ user, tasks }) {
           </div>
         </div>
 
-        <button type="submit" className="w-full mt-4 bg-indigo-600 text-white font-medium p-2.5 rounded-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">
+        {/* 【新機能】定期タスクの設定 */}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1">
+            <Repeat className="w-3 h-3" /> 繰り返し自動追加 (定期タスク)
+          </label>
+          <select value={recurrence} onChange={(e) => setRecurrence(e.target.value)} className="w-full p-2 border border-slate-300 bg-slate-50 text-indigo-700 font-bold rounded-md text-sm outline-none">
+            <option value="none">設定しない (1回限り)</option>
+            <option value="daily">毎日追加する</option>
+            <option value="weekly">毎週追加する</option>
+          </select>
+        </div>
+
+        <button type="submit" className="w-full mt-2 bg-indigo-600 text-white font-medium p-2.5 rounded-lg hover:bg-indigo-700 transition flex justify-center items-center gap-2">
           <Plus className="w-4 h-4" /> タスクを追加
         </button>
       </form>
@@ -330,6 +416,14 @@ function TaskForm({ user, tasks }) {
 function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
   const [sortBy, setSortBy] = useState('dueDate');
   const [filterStatus, setFilterStatus] = useState('active');
+  const [filterLargeTask, setFilterLargeTask] = useState('all');
+  
+  // ドラッグ＆ドロップで「今どのタスクの上にいるか」を記憶する
+  const [dragOverTaskId, setDragOverTaskId] = useState(null);
+
+  const uniqueLargeTasks = useMemo(() => {
+    return [...new Set(tasks.map(t => t.largeTaskName).filter(Boolean))];
+  }, [tasks]);
 
   const processedTasks = useMemo(() => {
     let result = [...tasks];
@@ -342,7 +436,16 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
       result = result.filter(t => t.calendarRegistered === true);
     }
 
+    if (filterLargeTask !== 'all') {
+      result = result.filter(t => t.largeTaskName === filterLargeTask);
+    }
+
     result.sort((a, b) => {
+      // 並び替えが「手動（カスタム）」の場合は、order番号で並べます
+      if (sortBy === 'manual') {
+        return (a.order || 0) - (b.order || 0);
+      }
+      // それ以外は従来のルール
       if (sortBy === 'dueDate') {
         if (!a.dueDate) return 1;
         if (!b.dueDate) return -1;
@@ -355,7 +458,31 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
       }
     });
     return result;
-  }, [tasks, sortBy, filterStatus]);
+  }, [tasks, sortBy, filterStatus, filterLargeTask]);
+
+  // 【新機能】ドラッグ＆ドロップでタスクの順番を入れ替える機能
+  const handleReorder = async (sourceId, targetId) => {
+    if (sourceId === targetId) return;
+
+    // 現在画面に出ている順番を取得
+    const sourceIdx = processedTasks.findIndex(t => t.id === sourceId);
+    const targetIdx = processedTasks.findIndex(t => t.id === targetId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    // 順番を入れ替えた新しいリストを作る
+    const newTasks = [...processedTasks];
+    const [moved] = newTasks.splice(sourceIdx, 1);
+    newTasks.splice(targetIdx, 0, moved);
+
+    // ドラッグした瞬間に、自動で「手動並び替え」モードに切り替えます
+    setSortBy('manual');
+
+    // 入れ替わったすべてのタスクに、新しい「出席番号(order)」をふり直してデータベースに保存
+    newTasks.forEach(async (t, index) => {
+      const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', t.id);
+      await updateDoc(taskRef, { order: index });
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -369,6 +496,22 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
         </div>
         
         <div className="flex flex-wrap items-center gap-4 text-sm">
+          {uniqueLargeTasks.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 font-medium">プロジェクト:</span>
+              <select 
+                value={filterLargeTask} 
+                onChange={(e) => setFilterLargeTask(e.target.value)} 
+                className="bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded p-1 outline-none max-w-[140px] truncate"
+              >
+                <option value="all">すべて</option>
+                {uniqueLargeTasks.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <label className="flex items-center gap-2 cursor-pointer text-slate-600 select-none bg-slate-50 px-2 py-1 rounded border border-slate-200">
             <input 
               type="checkbox" 
@@ -376,14 +519,16 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
               onChange={(e) => setIsCompactMode(e.target.checked)}
               className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
             />
-            <span className="font-medium text-xs">
-              コンパクト表示
+            <span className="font-medium text-xs flex items-center gap-1">
+              {isCompactMode ? <List className="w-3.5 h-3.5"/> : <Grid className="w-3.5 h-3.5"/>}
+              簡易表示
             </span>
           </label>
 
           <div className="flex items-center gap-2">
             <span className="text-slate-500">並び替え:</span>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-slate-50 border border-slate-200 rounded p-1 outline-none">
+              <option value="manual">✋ 手動 (カスタム)</option>
               <option value="dueDate">期日が近い順</option>
               <option value="priority">重要度が高い順</option>
               <option value="createdAt">登録が新しい順</option>
@@ -399,7 +544,28 @@ function TaskList({ user, tasks, isCompactMode, setIsCompactMode }) {
           </div>
         ) : (
           processedTasks.map(task => (
-            <TaskItem key={task.id} task={task} user={user} isCompact={isCompactMode} allTasks={tasks} />
+            // DND（ドラッグ＆ドロップ）用に、カードの上に重なった時の情報を渡します
+            <div 
+              key={task.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('taskId', task.id);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault(); // これがないとドロップできません
+                if (dragOverTaskId !== task.id) setDragOverTaskId(task.id);
+              }}
+              onDragLeave={() => setDragOverTaskId(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverTaskId(null);
+                const sourceId = e.dataTransfer.getData('taskId');
+                handleReorder(sourceId, task.id);
+              }}
+              className={`transition-all duration-200 ${dragOverTaskId === task.id ? 'opacity-50 scale-95' : ''}`}
+            >
+              <TaskItem task={task} user={user} isCompact={isCompactMode} allTasks={tasks} />
+            </div>
           ))
         )}
       </div>
@@ -427,6 +593,29 @@ function TaskItem({ task, user, isCompact, allTasks }) {
   const uniqueLargeTasks = useMemo(() => [...new Set(allTasks.map(t => t.largeTaskName).filter(Boolean))], [allTasks]);
   const uniqueMediumTasks = useMemo(() => [...new Set(allTasks.map(t => t.mediumTaskName).filter(Boolean))], [allTasks]);
 
+  // 今日の日付を取得（アラート機能用）
+  const today = new Date();
+  const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+  const isCompleted = task.status === 'completed';
+
+  // 【新機能】期日アラートの判定
+  const isOverdue = task.dueDate && task.dueDate < todayStr && !isCompleted; // 期限切れ（過去）
+  const isToday = task.dueDate === todayStr && !isCompleted;               // 期限が今日
+
+  // アラートによる枠や背景の色の切り替えルール
+  let cardBorderColor = "border-slate-200 hover:border-slate-300";
+  let cardBgColor = "bg-white";
+  if (isCompleted) {
+    cardBorderColor = "border-slate-200";
+    cardBgColor = "bg-slate-50 opacity-75";
+  } else if (isOverdue) {
+    cardBorderColor = "border-red-400"; // 期限切れは赤！
+    cardBgColor = "bg-red-50/50";
+  } else if (isToday) {
+    cardBorderColor = "border-amber-400"; // 今日はオレンジ！
+    cardBgColor = "bg-amber-50/50";
+  }
+
   useEffect(() => {
     let interval;
     if (task.status === 'in_progress' && task.timerSessionStartTime) {
@@ -448,17 +637,14 @@ function TaskItem({ task, user, isCompact, allTasks }) {
     await updateDoc(taskRef, updates);
   };
 
-  const handleStart = () => {
-    updateTask({ status: 'in_progress', timerSessionStartTime: Date.now() });
-  };
-
+  const handleStart = () => updateTask({ status: 'in_progress', timerSessionStartTime: Date.now() });
+  
   const handlePause = () => {
     if (task.timerSessionStartTime) {
       const ms = Date.now() - task.timerSessionStartTime;
-      const mins = Math.floor(ms / 60000);
       updateTask({
         status: 'paused',
-        actualMinutes: task.actualMinutes + mins,
+        actualMinutes: task.actualMinutes + Math.floor(ms / 60000),
         timerSessionStartTime: null
       });
     }
@@ -467,20 +653,14 @@ function TaskItem({ task, user, isCompact, allTasks }) {
   const handleComplete = () => {
     let finalActualMins = task.actualMinutes;
     if (task.status === 'in_progress' && task.timerSessionStartTime) {
-      const ms = Date.now() - task.timerSessionStartTime;
-      finalActualMins += Math.floor(ms / 60000);
+      finalActualMins += Math.floor((Date.now() - task.timerSessionStartTime) / 60000);
     }
-    updateTask({
-      status: 'completed',
-      actualMinutes: finalActualMins,
-      timerSessionStartTime: null
-    });
+    updateTask({ status: 'completed', actualMinutes: finalActualMins, timerSessionStartTime: null });
   };
 
   const handleDelete = async () => {
     if (!user) return;
-    const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
-    await deleteDoc(taskRef);
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id));
   };
 
   const handleManualTimeSave = () => {
@@ -514,61 +694,42 @@ function TaskItem({ task, user, isCompact, allTasks }) {
   const getCalendarUrl = () => {
     const titleText = encodeURIComponent(`[タスク完了] ${task.title}`);
     const details = encodeURIComponent(
-      `プロジェクト (大): ${task.largeTaskName}\n` +
-      `フェーズ (中): ${task.mediumTaskName}\n\n` +
-      `カテゴリ: ${CATEGORIES[task.category]}\n` +
+      `プロジェクト: ${task.largeTaskName} > ${task.mediumTaskName}\n` +
       `予測時間: ${task.estimatedMinutes}分\n` +
       `実績時間: ${task.actualMinutes}分`
     );
-    
     const end = new Date();
-    const duration = task.actualMinutes > 0 ? task.actualMinutes : 1;
-    const start = new Date(end.getTime() - duration * 60000);
+    const start = new Date(end.getTime() - (task.actualMinutes > 0 ? task.actualMinutes : 1) * 60000);
     const fmt = (d) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${titleText}&details=${details}&dates=${fmt(start)}/${fmt(end)}`;
   };
 
-  const isCompleted = task.status === 'completed';
-
+  // ------------------------------------------
   // パターンA：編集モード
+  // ------------------------------------------
   if (isEditingTask) {
     return (
       <div className="bg-white rounded-xl shadow-md border-2 border-indigo-400 p-4 space-y-3">
         <div className="flex justify-between items-center border-b pb-2">
-          <span className="text-xs font-bold text-indigo-600 flex items-center gap-1">
-            <Edit3 className="w-3.5 h-3.5"/> タスク内容を修正
-          </span>
-          <button onClick={() => setIsEditingTask(false)} className="text-slate-400 hover:text-slate-600 font-bold">
-            ✕
-          </button>
+          <span className="text-xs font-bold text-indigo-600 flex items-center gap-1"><Edit className="w-3.5 h-3.5"/> タスク内容を修正</span>
+          <button onClick={() => setIsEditingTask(false)} className="text-slate-400 hover:text-slate-600 font-bold"><X className="w-4 h-4"/></button>
         </div>
-        
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
             <label className="block text-slate-500 font-semibold mb-0.5">大タスク</label>
             <input type="text" list={`edit-large-${task.id}`} value={editLarge} onChange={(e)=>setEditLarge(e.target.value)} className="w-full p-1.5 border rounded" />
-            <datalist id={`edit-large-${task.id}`}>
-              {uniqueLargeTasks.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
+            <datalist id={`edit-large-${task.id}`}>{uniqueLargeTasks.map(n => <option key={n} value={n} />)}</datalist>
           </div>
           <div>
             <label className="block text-slate-500 font-semibold mb-0.5">中タスク</label>
             <input type="text" list={`edit-medium-${task.id}`} value={editMedium} onChange={(e)=>setEditMedium(e.target.value)} className="w-full p-1.5 border rounded" />
-            <datalist id={`edit-medium-${task.id}`}>
-              {uniqueMediumTasks.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
+            <datalist id={`edit-medium-${task.id}`}>{uniqueMediumTasks.map(n => <option key={n} value={n} />)}</datalist>
           </div>
         </div>
-
         <div>
           <label className="block text-xs text-slate-700 font-semibold mb-0.5">小タスク (作業名)</label>
           <input type="text" value={editTitle} onChange={(e)=>setEditTitle(e.target.value)} className="w-full p-2 border rounded text-sm font-medium" />
         </div>
-
         <div className="grid grid-cols-4 gap-2 text-xs">
           <div>
             <label className="block text-slate-500 font-semibold mb-0.5">カテゴリ</label>
@@ -591,7 +752,6 @@ function TaskItem({ task, user, isCompact, allTasks }) {
             <input type="number" value={editEstimated} onChange={(e)=>setEditEstimated(e.target.value)} className="w-full p-1.5 border rounded" />
           </div>
         </div>
-
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={() => setIsEditingTask(false)} className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded text-xs font-medium hover:bg-slate-200">キャンセル</button>
           <button onClick={handleSaveTaskEdit} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 flex items-center gap-1 shadow-sm"><Check className="w-3.5 h-3.5"/> 変更を保存</button>
@@ -600,11 +760,19 @@ function TaskItem({ task, user, isCompact, allTasks }) {
     );
   }
 
+  // ------------------------------------------
   // パターンB：簡易表示モード
+  // ------------------------------------------
   if (isCompact) {
     return (
-      <div className={`bg-white rounded-lg shadow-sm border px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm transition-all ${isCompleted ? 'border-slate-200 opacity-60 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className={`rounded-lg shadow-sm border px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm transition-all ${cardBorderColor} ${cardBgColor}`}>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          
+          {/* ドラッグ用のグリップアイコン */}
+          <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500 px-1">
+            <GripVertical className="w-4 h-4" />
+          </div>
+
           <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0 ${PRIORITY_COLORS[task.priority]}`}>
             {PRIORITIES[task.priority]}
           </span>
@@ -616,9 +784,13 @@ function TaskItem({ task, user, isCompact, allTasks }) {
               ({task.largeTaskName} &gt; {task.mediumTaskName})
             </span>
           </div>
+          
+          {/* 期日の表示（アラート状態によって色を変えます） */}
           {task.dueDate && (
-            <span className="text-[11px] text-slate-500 shrink-0 bg-slate-100 px-1.5 py-0.5 rounded font-medium">
-              ⏰ {task.dueDate}
+            <span className={`text-[11px] shrink-0 px-1.5 py-0.5 rounded font-medium flex items-center gap-1
+              ${isOverdue ? 'bg-red-100 text-red-700' : isToday ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}
+            `}>
+              {isOverdue || isToday ? <AlertCircle className="w-3 h-3" /> : '⏰'} {task.dueDate}
             </span>
           )}
         </div>
@@ -637,19 +809,15 @@ function TaskItem({ task, user, isCompact, allTasks }) {
                   <button onClick={handlePause} className="p-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 animate-pulse" title="一時停止"><Pause className="w-3.5 h-3.5" /></button>
                 )}
                 <button onClick={handleComplete} className="p-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition" title="完了"><Check className="w-3.5 h-3.5" /></button>
-                <button onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }} className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-50" title="修正変更"><Edit3 className="w-3.5 h-3.5"/></button>
+                <button onClick={() => setIsEditingTask(true)} className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-slate-50" title="修正変更"><Edit className="w-3.5 h-3.5"/></button>
               </>
             )}
             
             {isCompleted && (
               task.calendarRegistered ? (
-                <span className="p-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed" title="カレンダーに登録済み">
-                  <Check className="w-4 h-4 text-emerald-500"/>
-                </span>
+                <span className="p-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed" title="カレンダーに登録済み"><CheckCircle className="w-4 h-4 text-emerald-500"/></span>
               ) : (
-                <button onClick={handleCalendarRegister} className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition" title="カレンダー登録">
-                  <CalendarPlus className="w-3.5 h-3.5" />
-                </button>
+                <button onClick={handleCalendarRegister} className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition" title="カレンダー登録"><CalendarPlus className="w-3.5 h-3.5" /></button>
               )
             )}
             <button onClick={handleDelete} className="p-1 text-slate-300 hover:text-red-500 rounded transition" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -659,136 +827,137 @@ function TaskItem({ task, user, isCompact, allTasks }) {
     );
   }
 
+  // ------------------------------------------
   // パターンC：通常表示モード
+  // ------------------------------------------
   return (
-    <div className={`bg-white rounded-xl shadow-sm border p-4 transition-all duration-300 ${isCompleted ? 'border-slate-200 opacity-75 bg-slate-50' : 'border-slate-200 hover:shadow-md'}`}>
+    <div className={`rounded-xl shadow-sm border transition-all duration-300 ${cardBorderColor} ${cardBgColor}`}>
       
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium bg-slate-100 w-fit px-2 py-1 rounded">
-          <Folder className="w-3 h-3" />
-          <span>{task.largeTaskName}</span>
-          <span className="text-slate-300">&gt;</span>
-          <FileText className="w-3 h-3" />
-          <span>{task.mediumTaskName}</span>
+      {/* 💳 カード上部のヘッダー部分 */}
+      <div className="flex items-center justify-between p-3 border-b border-slate-100/50 bg-white/50 rounded-t-xl">
+        <div className="flex items-center gap-3">
+          {/* ドラッグ用のグリップアイコン */}
+          <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-indigo-500">
+            <GripVertical className="w-4 h-4" />
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-medium bg-slate-100/80 w-fit px-2 py-1 rounded">
+            <Folder className="w-3 h-3" />
+            <span>{task.largeTaskName}</span>
+            <span className="text-slate-300">&gt;</span>
+            <FileText className="w-3 h-3" />
+            <span>{task.mediumTaskName}</span>
+          </div>
         </div>
         
-        {!isCompleted && (
-          <button 
-            onClick={() => { setIsEditingTask(true); setEditTitle(task.title); setEditLarge(task.largeTaskName); setEditMedium(task.mediumTaskName); setEditCategory(task.category); setEditPriority(task.priority); setEditDueDate(task.dueDate || ''); setEditEstimated(task.estimatedMinutes); }}
-            className="text-slate-400 hover:text-indigo-600 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded hover:bg-slate-50 transition"
-          >
-            <Edit3 className="w-3 h-3"/>
-            修正する
-          </button>
-        )}
-      </div>
-
-      <div className="flex justify-between items-start gap-4">
-        <div className="flex-1">
-          <h3 className={`text-lg font-bold mb-2 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-800'}`}>
-            {task.title}
-          </h3>
-          <div className="flex flex-wrap gap-2 mb-4">
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[task.priority]}`}>
-              {PRIORITIES[task.priority]}
+        <div className="flex items-center gap-2">
+          {/* 定期タスクの目印 */}
+          {task.isRoutine && (
+            <span className="text-[10px] bg-indigo-50 text-indigo-600 font-bold px-1.5 py-0.5 rounded flex items-center gap-1">
+              <Repeat className="w-3 h-3" /> 定期
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[task.category]}`}>
-              {CATEGORIES[task.category]}
-            </span>
-            {task.dueDate && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                期日: {task.dueDate}
-              </span>
-            )}
-          </div>
-        </div>
+          )}
 
-        <button onClick={handleDelete} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="タスク削除">
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-        
-        <div className="flex items-center gap-4 w-full sm:w-auto">
-          <div className="text-center">
-            <p className="text-xs text-slate-500 font-medium">予測</p>
-            <p className="text-lg font-bold text-slate-700">{task.estimatedMinutes}<span className="text-xs font-normal text-slate-500 ml-1">分</span></p>
-          </div>
-          <div className="text-slate-300 text-2xl font-light">/</div>
-          <div className="text-center group relative">
-            <p className="text-xs text-indigo-500 font-medium flex items-center justify-center gap-1">
-              実績
-              {!isCompleted && !isEditingTime && (
-                <button onClick={() => { setIsEditingTime(true); setManualTime(totalActualMinutes); }} className="text-slate-400 hover:text-indigo-600 p-0.5 rounded" title="実績時間を直接手書きで修正">
-                  <Edit3 className="w-3 h-3" />
-                </button>
-              )}
-            </p>
-            {isEditingTime ? (
-              <div className="flex items-center gap-1">
-                <input 
-                  type="number" 
-                  value={manualTime} 
-                  onChange={(e) => setManualTime(e.target.value)}
-                  className="w-16 p-1 text-center border border-indigo-300 rounded text-sm outline-none"
-                />
-                <button onClick={handleManualTimeSave} className="bg-indigo-100 text-indigo-700 p-1 rounded hover:bg-indigo-200"><Check className="w-4 h-4"/></button>
-              </div>
-            ) : (
-              <p className={`text-lg font-bold ${task.status === 'in_progress' ? 'text-indigo-600 animate-pulse' : 'text-slate-700'}`}>
-                {totalActualMinutes}
-                <span className="text-xs font-normal text-slate-500 ml-1">分</span>
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           {!isCompleted && (
-            <>
-              {task.status !== 'in_progress' ? (
-                <button onClick={handleStart} className="flex items-center gap-1 bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 transition shadow-sm">
-                  <Play className="w-4 h-4" /> スタート
+            <button onClick={() => setIsEditingTask(true)} className="text-slate-400 hover:text-indigo-600 flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded hover:bg-slate-50 transition">
+              <Edit className="w-3 h-3"/> 修正する
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="flex justify-between items-start gap-4">
+          <div className="flex-1">
+            <h3 className={`text-lg font-bold mb-2 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+              {task.title}
+            </h3>
+            <div className="flex flex-wrap gap-2 mb-4">
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[task.priority]}`}>{PRIORITIES[task.priority]}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[task.category]}`}>{CATEGORIES[task.category]}</span>
+              
+              {/* 期日の表示（アラート対応） */}
+              {task.dueDate && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1
+                  ${isOverdue ? 'bg-red-100 text-red-700' : isToday ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}
+                `}>
+                  <AlertCircle className="w-3 h-3" /> 期日: {task.dueDate}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <button onClick={handleDelete} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="タスク削除">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="bg-white/80 rounded-lg p-3 border border-slate-200/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          
+          <div className="flex items-center gap-4 w-full sm:w-auto">
+            <div className="text-center">
+              <p className="text-xs text-slate-500 font-medium">予測</p>
+              <p className="text-lg font-bold text-slate-700">{task.estimatedMinutes}<span className="text-xs font-normal text-slate-500 ml-1">分</span></p>
+            </div>
+            <div className="text-slate-300 text-2xl font-light">/</div>
+            <div className="text-center group relative">
+              <p className="text-xs text-indigo-500 font-medium flex items-center justify-center gap-1">
+                実績
+                {!isCompleted && !isEditingTime && (
+                  <button onClick={() => { setIsEditingTime(true); setManualTime(totalActualMinutes); }} className="text-slate-400 hover:text-indigo-600 p-0.5 rounded" title="実績時間を直接手書きで修正">
+                    <Edit className="w-3 h-3" />
+                  </button>
+                )}
+              </p>
+              {isEditingTime ? (
+                <div className="flex items-center gap-1">
+                  <input type="number" value={manualTime} onChange={(e) => setManualTime(e.target.value)} className="w-16 p-1 text-center border border-indigo-300 rounded text-sm outline-none" />
+                  <button onClick={handleManualTimeSave} className="bg-indigo-100 text-indigo-700 p-1 rounded hover:bg-indigo-200"><Check className="w-4 h-4"/></button>
+                </div>
+              ) : (
+                <p className={`text-lg font-bold ${task.status === 'in_progress' ? 'text-indigo-600 animate-pulse' : 'text-slate-700'}`}>
+                  {totalActualMinutes}
+                  <span className="text-xs font-normal text-slate-500 ml-1">分</span>
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            {!isCompleted && (
+              <>
+                {task.status !== 'in_progress' ? (
+                  <button onClick={handleStart} className="flex items-center gap-1 bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 transition shadow-sm"><Play className="w-4 h-4" /> スタート</button>
+                ) : (
+                  <button onClick={handlePause} className="flex items-center gap-1 bg-amber-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-600 transition shadow-sm"><Pause className="w-4 h-4" /> 一時停止</button>
+                )}
+                <button onClick={handleComplete} className="flex items-center gap-1 bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium hover:bg-slate-300 transition"><CheckSquare className="w-4 h-4" /> 完了</button>
+              </>
+            )}
+
+            {isCompleted && (
+              task.calendarRegistered ? (
+                <button disabled className="flex items-center gap-2 bg-slate-100 text-slate-400 border border-slate-200 px-4 py-2 rounded-lg font-medium cursor-not-allowed">
+                  <CheckCircle className="w-4 h-4 text-emerald-500" /> カレンダー登録済
                 </button>
               ) : (
-                <button onClick={handlePause} className="flex items-center gap-1 bg-amber-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-600 transition shadow-sm">
-                  <Pause className="w-4 h-4" /> 一時停止
+                <button onClick={handleCalendarRegister} className="flex items-center gap-2 bg-[#4285F4] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#3367D6] transition shadow-sm">
+                  <CalendarPlus className="w-4 h-4" /> カレンダーに登録
                 </button>
-              )}
-              
-              <button onClick={handleComplete} className="flex items-center gap-1 bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium hover:bg-slate-300 transition">
-                <CheckSquare className="w-4 h-4" /> 完了
-              </button>
-            </>
-          )}
-
-          {isCompleted && (
-            task.calendarRegistered ? (
-              <button disabled className="flex items-center gap-2 bg-slate-100 text-slate-400 border border-slate-200 px-4 py-2 rounded-lg font-medium cursor-not-allowed">
-                <Check className="w-4 h-4 text-emerald-500" /> カレンダー登録済
-              </button>
-            ) : (
-              <button 
-                onClick={handleCalendarRegister} 
-                className="flex items-center gap-2 bg-[#4285F4] text-white px-4 py-2 rounded-lg font-medium hover:bg-[#3367D6] transition shadow-sm"
-              >
-                <CalendarPlus className="w-4 h-4" /> カレンダーに登録
-              </button>
-            )
-          )}
+              )
+            )}
+          </div>
         </div>
+        
+        {task.estimatedMinutes > 0 && (
+          <div className="mt-3 h-1.5 w-full bg-slate-200/50 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full transition-all duration-500 ${totalActualMinutes > task.estimatedMinutes ? 'bg-red-500' : 'bg-indigo-500'}`}
+              style={{ width: `${Math.min((totalActualMinutes / task.estimatedMinutes) * 100, 100)}%` }}
+            />
+          </div>
+        )}
       </div>
-      
-      {task.estimatedMinutes > 0 && (
-        <div className="mt-3 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-          <div 
-            className={`h-full rounded-full transition-all duration-500 ${totalActualMinutes > task.estimatedMinutes ? 'bg-red-500' : 'bg-indigo-500'}`}
-            style={{ width: `${Math.min((totalActualMinutes / task.estimatedMinutes) * 100, 100)}%` }}
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -809,17 +978,23 @@ function AnalyticsDashboard({ tasks }) {
   }, [tasks, timeSpan]);
 
   const totals = useMemo(() => {
-    let est = 0;
-    let act = 0;
+    let est = 0; let act = 0;
+    // 【新機能】ルーティン（定期）タスクだけの時間も集計します
+    let routineEst = 0; let routineAct = 0;
+
     filteredTasks.forEach(t => {
       est += t.estimatedMinutes || 0;
       act += t.actualMinutes || 0;
+      if (t.isRoutine) {
+        routineEst += t.estimatedMinutes || 0;
+        routineAct += t.actualMinutes || 0;
+      }
     });
-    return { estimated: est, actual: act };
+    return { estimated: est, actual: act, routineEst, routineAct };
   }, [filteredTasks]);
 
   const categoryStats = useMemo(() => {
-    const stats = {
+    const stats: Record<string, any> = {
       work: { name: '仕事', est: 0, act: 0, color: 'bg-indigo-500' },
       side_job: { name: '副業', est: 0, act: 0, color: 'bg-emerald-500' },
       private: { name: 'プライベート', est: 0, act: 0, color: 'bg-purple-500' }
@@ -834,8 +1009,7 @@ function AnalyticsDashboard({ tasks }) {
   }, [filteredTasks]);
 
   const projectStats = useMemo(() => {
-    const projects = {};
-    
+    const projects: Record<string, any> = {};
     filteredTasks.forEach(t => {
       const pName = t.largeTaskName || '未分類';
       if (!projects[pName]) {
@@ -844,8 +1018,7 @@ function AnalyticsDashboard({ tasks }) {
       projects[pName].est += t.estimatedMinutes || 0;
       projects[pName].act += t.actualMinutes || 0;
     });
-    
-    return Object.values(projects).sort((a, b) => b.act - a.act).slice(0, 5);
+    return Object.values(projects).sort((a: any, b: any) => b.act - a.act).slice(0, 5);
   }, [filteredTasks]);
 
   const getWidthPercent = (value, max) => {
@@ -862,7 +1035,7 @@ function AnalyticsDashboard({ tasks }) {
       <div className="flex flex-wrap justify-between items-center border-b pb-4 gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            📊 タイムパフォーマンス分析
+            <BarChart className="w-5 h-5 text-indigo-500"/> タイムパフォーマンス分析
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">登録された予測時間と、ストップウォッチの実績時間を比較・分析します</p>
         </div>
@@ -874,7 +1047,7 @@ function AnalyticsDashboard({ tasks }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
           <p className="text-xs text-slate-400 font-bold">総タスク数</p>
           <p className="text-2xl font-black text-slate-700 mt-1">{filteredTasks.length}<span className="text-xs font-normal text-slate-400 ml-1">件</span></p>
@@ -886,6 +1059,15 @@ function AnalyticsDashboard({ tasks }) {
         <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-50 text-center">
           <p className="text-xs text-emerald-400 font-bold">総実績時間</p>
           <p className="text-2xl font-black text-emerald-600 mt-1">{totals.actual}<span className="text-xs font-normal text-emerald-400 ml-1">分</span></p>
+        </div>
+        
+        {/* 【新機能】定期タスクの利用時間を分析するメーター */}
+        <div className="bg-purple-50/50 p-4 rounded-xl border border-purple-50 text-center relative overflow-hidden">
+          <p className="text-xs text-purple-500 font-bold flex items-center justify-center gap-1"><Repeat className="w-3 h-3"/>定期タスク実績</p>
+          <p className="text-2xl font-black text-purple-600 mt-1">{totals.routineAct}<span className="text-xs font-normal text-purple-400 ml-1">分</span></p>
+          <div className="absolute bottom-0 left-0 h-1 bg-purple-200 w-full">
+            <div className="h-full bg-purple-500" style={{ width: `${totals.actual > 0 ? (totals.routineAct / totals.actual) * 100 : 0}%` }}></div>
+          </div>
         </div>
       </div>
 
